@@ -14,6 +14,13 @@ struct HistoryView: View {
 
     private var todayKey: String { WorkDay.key(for: .now) }
 
+    /// Summe der Über-/Minusstunden über alle Tage mit Stempelungen.
+    private var balance: Int {
+        store.days
+            .filter { !$0.intervals.isEmpty }
+            .reduce(0) { $0 + (worked(for: $1) - $1.sollMinutes) }
+    }
+
     var body: some View {
         List {
             if sortedDays.isEmpty {
@@ -22,7 +29,18 @@ struct HistoryView: View {
                     systemImage: "clock.arrow.circlepath",
                     description: Text("Deine Arbeitstage erscheinen hier automatisch.")
                 )
+            } else {
+                Section {
+                    HStack {
+                        Text("Saldo gesamt")
+                        Spacer()
+                        Text(TimeFormat.signedDuration(balance))
+                            .monospacedDigit()
+                            .foregroundStyle(balance < 0 ? .red : .green)
+                    }
+                }
             }
+
             ForEach(sortedDays) { day in
                 row(for: day)
                     .swipeActions {
@@ -37,8 +55,22 @@ struct HistoryView: View {
         .navigationTitle("Verlauf")
     }
 
+    /// Bezugszeitpunkt: für vergangene Tage die letzte Stempelung, für heute jetzt.
+    private func reference(for day: WorkDay) -> Int {
+        day.dateKey == todayKey
+            ? TimeFormat.minutes(of: .now)
+            : (day.lastEnd ?? day.firstStart ?? 0)
+    }
+
+    private func worked(for day: WorkDay) -> Int {
+        day.workedMinutes(now: reference(for: day))
+    }
+
     private func row(for day: WorkDay) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        let workedMinutes = worked(for: day)
+        let diff = workedMinutes - day.sollMinutes
+
+        return VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(day.date, format: .dateTime.weekday(.wide).day().month().year())
                     .font(.headline)
@@ -50,14 +82,25 @@ struct HistoryView: View {
                         .background(.green.opacity(0.2), in: Capsule())
                         .foregroundStyle(.green)
                 }
+                Spacer()
+                if !day.intervals.isEmpty {
+                    Text(TimeFormat.signedDuration(diff))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(diff < 0 ? .red : .green)
+                }
             }
             HStack(spacing: 16) {
-                Label("\(TimeFormat.clock(day.startMinutes)) – \(TimeFormat.clock(day.endMinutes))", systemImage: "clock")
-                Label(TimeFormat.duration(day.sollMinutes), systemImage: "briefcase")
-                Label(TimeFormat.duration(day.pauseTotal), systemImage: "cup.and.saucer")
+                Label(
+                    "\(day.firstStart.map(TimeFormat.clock) ?? "--:--") – \(day.lastEnd.map(TimeFormat.clock) ?? "--:--")",
+                    systemImage: "clock"
+                )
+                Label(TimeFormat.duration(workedMinutes), systemImage: "briefcase")
+                Label(TimeFormat.duration(day.pauseMinutes(now: reference(for: day))), systemImage: "cup.and.saucer")
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
         }
         .padding(.vertical, 2)
     }
