@@ -60,6 +60,7 @@ struct TodayView: View {
     @Binding var day: WorkDay
     let now: Date
     @FocusState private var keyboardActive: Bool
+    @State private var showCustomTime = false
 
     private let presets: [(label: String, min: Int)] = [
         ("4 h 18", 258),
@@ -76,7 +77,16 @@ struct TodayView: View {
     private var remaining: Int { day.endMinutes - nowMinutes }
     private var done: Bool { remaining <= 0 }
 
+    /// Bereits geleistete Arbeitszeit (ohne Pausen), ab Arbeitsbeginn bis jetzt.
+    private var workedMinutes: Int {
+        max(0, nowMinutes - day.startMinutes - day.pauseTotal)
+    }
+
+    /// Zeit über der Sollzeit hinaus.
+    private var overtimeMinutes: Int { max(0, -remaining) }
+
     private var progress: Double {
+        guard day.sollMinutes > 0 else { return 1 }
         guard nowMinutes >= day.startMinutes else { return 0 }
         let worked = min(nowMinutes - day.startMinutes - day.pauseTotal, day.sollMinutes)
         return max(0, min(1, Double(worked) / Double(day.sollMinutes)))
@@ -126,7 +136,7 @@ struct TodayView: View {
                     HStack {
                         Text(TimeFormat.clock(day.startMinutes))
                         Spacer()
-                        Text("\(Int(progress * 100)) % geleistet")
+                        Text("\(Int(progress * 100)) %")
                         Spacer()
                         Text(TimeFormat.clock(day.endMinutes))
                     }
@@ -135,6 +145,35 @@ struct TodayView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
+            }
+
+            // Geleistete Stunden
+            Section("Heute geleistet") {
+                HStack(spacing: 0) {
+                    stat(
+                        title: "Geleistet",
+                        value: TimeFormat.duration(workedMinutes),
+                        caption: "von \(TimeFormat.duration(day.sollMinutes))",
+                        tint: accent
+                    )
+                    Divider().frame(height: 44)
+                    if done {
+                        stat(
+                            title: "Überstunden",
+                            value: TimeFormat.duration(overtimeMinutes),
+                            caption: "über der Sollzeit",
+                            tint: .green
+                        )
+                    } else {
+                        stat(
+                            title: "Verbleibend",
+                            value: TimeFormat.duration(remaining),
+                            caption: "bis Feierabend",
+                            tint: .primary
+                        )
+                    }
+                }
+                .padding(.vertical, 4)
             }
 
             // Arbeitsbeginn
@@ -152,9 +191,16 @@ struct TodayView: View {
                             .font(.system(.subheadline, design: .monospaced))
                     }
                 }
-                Stepper(value: $day.sollMinutes, in: 0...960, step: 6) {
-                    Text("Eigene Zeit: \(TimeFormat.duration(day.sollMinutes))")
-                        .monospacedDigit()
+                DisclosureGroup(isExpanded: $showCustomTime) {
+                    DurationWheelPicker(minutes: $day.sollMinutes)
+                } label: {
+                    HStack {
+                        Text("Eigene Zeit")
+                        Spacer()
+                        Text(TimeFormat.duration(day.sollMinutes))
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
 
@@ -200,6 +246,26 @@ struct TodayView: View {
                 Button("Fertig") { keyboardActive = false }
             }
         }
+        .onAppear {
+            // Drehregler direkt zeigen, wenn die Sollzeit keiner Vorgabe entspricht.
+            showCustomTime = !presets.contains { $0.min == day.sollMinutes }
+        }
+    }
+
+    private func stat(title: String, value: String, caption: String, tint: Color) -> some View {
+        VStack(spacing: 2) {
+            Text(title)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.semibold).monospacedDigit())
+                .foregroundStyle(tint)
+                .contentTransition(.numericText())
+            Text(caption)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 
