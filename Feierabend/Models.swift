@@ -117,13 +117,10 @@ struct WorkDay: Identifiable, Codable, Equatable {
         finished = asFeierabend
     }
 
-    /// Fügt einen manuellen Eintrag hinzu und liefert dessen id.
-    @discardableResult
-    mutating func addManualInterval(defaultStart: Int) -> UUID {
+    /// Fügt einen manuellen Eintrag hinzu, der anschließend korrigiert werden kann.
+    mutating func addManualInterval(defaultStart: Int) {
         let start = min(lastEnd ?? defaultStart, 23 * 60)
-        let interval = WorkInterval(start: start, end: min(start + 60, 24 * 60 - 1))
-        intervals.append(interval)
-        return interval.id
+        intervals.append(WorkInterval(start: start, end: min(start + 60, 24 * 60 - 1)))
     }
 
     // MARK: Datum
@@ -206,23 +203,29 @@ struct WorkDay: Identifiable, Codable, Equatable {
 
 enum TimeFormat {
     /// Minuten seit Mitternacht für ein Datum.
-    static func minutes(of date: Date) -> Int {
+    nonisolated static func minutes(of date: Date) -> Int {
         let c = Calendar.current.dateComponents([.hour, .minute], from: date)
         return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
 
-    static func clock(_ minutes: Int) -> String {
+    nonisolated static func clock(_ minutes: Int) -> String {
         let m = ((minutes % 1440) + 1440) % 1440
         return String(format: "%02d:%02d", m / 60, m % 60)
     }
 
-    static func duration(_ minutes: Int) -> String {
+    /// Uhrzeit oder Platzhalter, wenn nichts gestempelt wurde.
+    nonisolated static func clockOrDash(_ minutes: Int?) -> String {
+        guard let minutes else { return "--:--" }
+        return clock(minutes)
+    }
+
+    nonisolated static func duration(_ minutes: Int) -> String {
         let m = abs(minutes)
         return "\(m / 60) h \(String(format: "%02d", m % 60)) min"
     }
 
     /// Mit Vorzeichen, z. B. "+0 h 12 min" für Überstunden.
-    static func signedDuration(_ minutes: Int) -> String {
+    nonisolated static func signedDuration(_ minutes: Int) -> String {
         (minutes < 0 ? "−" : "+") + duration(minutes)
     }
 }

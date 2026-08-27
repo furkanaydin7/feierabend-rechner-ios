@@ -127,7 +127,7 @@ struct TodayView: View {
                 Text(done ? "Feierabend war um" : "Feierabend um")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Text(endMinutes.map(TimeFormat.clock) ?? "--:--")
+                Text(TimeFormat.clockOrDash(endMinutes))
                     .font(.system(size: 56, weight: .bold, design: .monospaced))
                     .foregroundStyle(accent)
                     .contentTransition(.numericText())
@@ -153,11 +153,11 @@ struct TodayView: View {
                     .tint(accent)
                     .padding(.top, 8)
                 HStack {
-                    Text(day.firstStart.map(TimeFormat.clock) ?? "--:--")
+                    Text(TimeFormat.clockOrDash(day.firstStart))
                     Spacer()
                     Text("\(Int(day.progress(now: nowMinutes) * 100)) %")
                     Spacer()
-                    Text(endMinutes.map(TimeFormat.clock) ?? "--:--")
+                    Text(TimeFormat.clockOrDash(endMinutes))
                 }
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.secondary)

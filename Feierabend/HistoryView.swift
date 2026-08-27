@@ -91,7 +91,7 @@ struct HistoryView: View {
             }
             HStack(spacing: 16) {
                 Label(
-                    "\(day.firstStart.map(TimeFormat.clock) ?? "--:--") – \(day.lastEnd.map(TimeFormat.clock) ?? "--:--")",
+                    "\(TimeFormat.clockOrDash(day.firstStart)) – \(TimeFormat.clockOrDash(day.lastEnd))",
                     systemImage: "clock"
                 )
                 Label(TimeFormat.duration(workedMinutes), systemImage: "briefcase")
