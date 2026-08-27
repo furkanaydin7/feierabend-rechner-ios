@@ -59,8 +59,8 @@ struct ContentView: View {
 struct TodayView: View {
     @Binding var day: WorkDay
     let now: Date
-    @FocusState private var keyboardActive: Bool
     @State private var showCustomTime = false
+    @State private var stampCount = 0
 
     private let presets: [(label: String, min: Int)] = [
         ("4 h 18", 258),
@@ -69,203 +69,309 @@ struct TodayView: View {
     ]
 
     // MARK: Berechnungen
-    private var nowMinutes: Int {
-        let c = Calendar.current.dateComponents([.hour, .minute], from: now)
-        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
-    }
-
-    private var remaining: Int { day.endMinutes - nowMinutes }
-    private var done: Bool { remaining <= 0 }
-
-    /// Bereits geleistete Arbeitszeit (ohne Pausen), ab Arbeitsbeginn bis jetzt.
-    private var workedMinutes: Int {
-        max(0, nowMinutes - day.startMinutes - day.pauseTotal)
-    }
-
-    /// Zeit über der Sollzeit hinaus.
-    private var overtimeMinutes: Int { max(0, -remaining) }
-
-    private var progress: Double {
-        guard day.sollMinutes > 0 else { return 1 }
-        guard nowMinutes >= day.startMinutes else { return 0 }
-        let worked = min(nowMinutes - day.startMinutes - day.pauseTotal, day.sollMinutes)
-        return max(0, min(1, Double(worked) / Double(day.sollMinutes)))
-    }
+    private var nowMinutes: Int { TimeFormat.minutes(of: now) }
+    private var worked: Int { day.workedMinutes(now: nowMinutes) }
+    private var pause: Int { day.pauseMinutes(now: nowMinutes) }
+    private var remaining: Int { day.remainingMinutes(now: nowMinutes) }
+    private var done: Bool { day.isDone(now: nowMinutes) }
+    private var endMinutes: Int? { day.endMinutes(now: nowMinutes) }
 
     private var accent: Color { done ? .green : Color(red: 0.92, green: 0, blue: 0) }
 
-    private var startTime: Binding<Date> {
-        Binding {
-            Calendar.current.date(
-                bySettingHour: day.startMinutes / 60,
-                minute: day.startMinutes % 60,
-                second: 0, of: now) ?? now
-        } set: { newValue in
-            let c = Calendar.current.dateComponents([.hour, .minute], from: newValue)
-            day.startMinutes = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+    private var statusText: String {
+        if let running = day.runningInterval {
+            return "Eingestempelt seit \(TimeFormat.clock(running.start))"
         }
+        if day.finished, let end = day.lastEnd {
+            return "Ausgestempelt um \(TimeFormat.clock(end))"
+        }
+        if let end = day.lastEnd {
+            return "Pause seit \(TimeFormat.clock(end))"
+        }
+        return "Heute noch nicht gestempelt"
+    }
+
+    private var statusIcon: String {
+        if day.isRunning { return "record.circle" }
+        if day.finished { return "checkmark.circle" }
+        if day.lastEnd != nil { return "pause.circle" }
+        return "clock"
+    }
+
+    private var statusColor: Color {
+        if day.isRunning { return .green }
+        if day.finished { return .secondary }
+        if day.lastEnd != nil { return .orange }
+        return .secondary
     }
 
     // MARK: Body
     var body: some View {
         Form {
-            // Ergebnis
-            Section {
-                VStack(spacing: 6) {
-                    Text(done ? "Feierabend war um" : "Feierabend um")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Text(TimeFormat.clock(day.endMinutes))
-                        .font(.system(size: 56, weight: .bold, design: .monospaced))
-                        .foregroundStyle(accent)
-                        .contentTransition(.numericText())
-                    if done {
-                        Text("Zeit erreicht — schönen Feierabend! 🎉")
-                            .font(.subheadline)
-                    } else if nowMinutes < day.startMinutes {
-                        Text("Arbeitsbeginn erst um \(TimeFormat.clock(day.startMinutes))")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("noch \(TimeFormat.duration(remaining))")
-                            .font(.subheadline)
-                    }
-                    ProgressView(value: progress)
-                        .tint(accent)
-                        .padding(.top, 8)
-                    HStack {
-                        Text(TimeFormat.clock(day.startMinutes))
-                        Spacer()
-                        Text("\(Int(progress * 100)) %")
-                        Spacer()
-                        Text(TimeFormat.clock(day.endMinutes))
-                    }
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-            }
-
-            // Geleistete Stunden
-            Section("Heute geleistet") {
-                HStack(spacing: 0) {
-                    stat(
-                        title: "Geleistet",
-                        value: TimeFormat.duration(workedMinutes),
-                        caption: "von \(TimeFormat.duration(day.sollMinutes))",
-                        tint: accent
-                    )
-                    Divider().frame(height: 44)
-                    if done {
-                        stat(
-                            title: "Überstunden",
-                            value: TimeFormat.duration(overtimeMinutes),
-                            caption: "über der Sollzeit",
-                            tint: .green
-                        )
-                    } else {
-                        stat(
-                            title: "Verbleibend",
-                            value: TimeFormat.duration(remaining),
-                            caption: "bis Feierabend",
-                            tint: .primary
-                        )
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-
-            // Arbeitsbeginn
-            Section("Arbeitsbeginn") {
-                DatePicker("Start", selection: startTime, displayedComponents: .hourAndMinute)
-            }
-
-            // Sollzeit
-            Section("Sollzeit heute") {
-                HStack(spacing: 8) {
-                    ForEach(presets, id: \.min) { p in
-                        Button(p.label) { day.sollMinutes = p.min }
-                            .buttonStyle(.bordered)
-                            .tint(day.sollMinutes == p.min ? accent : .gray)
-                            .font(.system(.subheadline, design: .monospaced))
-                    }
-                }
-                DisclosureGroup(isExpanded: $showCustomTime) {
-                    DurationWheelPicker(minutes: $day.sollMinutes)
-                } label: {
-                    HStack {
-                        Text("Eigene Zeit")
-                        Spacer()
-                        Text(TimeFormat.duration(day.sollMinutes))
-                            .monospacedDigit()
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-
-            // Pausen
-            Section {
-                ForEach($day.pausen) { $pause in
-                    HStack {
-                        Text("Pause")
-                        Spacer()
-                        TextField("min", value: $pause.minutes, format: .number)
-                            .keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing)
-                            .frame(width: 56)
-                            .textFieldStyle(.roundedBorder)
-                            .monospacedDigit()
-                            .focused($keyboardActive)
-                        Text("min")
-                            .foregroundStyle(.secondary)
-                        Stepper("", value: $pause.minutes, in: 0...240, step: 1)
-                            .labelsHidden()
-                    }
-                }
-                .onDelete { day.pausen.remove(atOffsets: $0) }
-
-                Button {
-                    withAnimation { day.pausen.append(Pause(minutes: 15)) }
-                } label: {
-                    Label("Pause hinzufügen", systemImage: "plus.circle")
-                }
-            } header: {
-                HStack {
-                    Text("Pausen")
-                    Spacer()
-                    Text("Total \(TimeFormat.duration(day.pauseTotal))")
-                }
-            } footer: {
-                Text("Zum Löschen einer Pause nach links wischen.")
-            }
+            headerSection
+            stampSection
+            statsSection
+            intervalSection
+            sollSection
         }
-        .toolbar {
-            ToolbarItemGroup(placement: .keyboard) {
-                Spacer()
-                Button("Fertig") { keyboardActive = false }
-            }
-        }
+        .sensoryFeedback(.impact, trigger: stampCount)
         .onAppear {
-            // Drehregler direkt zeigen, wenn die Sollzeit keiner Vorgabe entspricht.
-            showCustomTime = !presets.contains { $0.min == day.sollMinutes }
+            showCustomTime = !presets.contains(where: { $0.min == day.sollMinutes })
         }
     }
 
-    private func stat(title: String, value: String, caption: String, tint: Color) -> some View {
+    // MARK: Kopf mit Feierabend-Uhrzeit
+    private var headerSection: some View {
+        Section {
+            VStack(spacing: 6) {
+                Text(done ? "Feierabend war um" : "Feierabend um")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(endMinutes.map(TimeFormat.clock) ?? "--:--")
+                    .font(.system(size: 56, weight: .bold, design: .monospaced))
+                    .foregroundStyle(accent)
+                    .contentTransition(.numericText())
+
+                if done {
+                    Text("Sollzeit erreicht — schönen Feierabend! 🎉")
+                        .font(.subheadline)
+                } else if endMinutes == nil {
+                    Text("Stemple dich ein, um zu starten")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else if day.isRunning {
+                    Text("noch \(TimeFormat.duration(remaining))")
+                        .font(.subheadline)
+                } else {
+                    Text("noch \(TimeFormat.duration(remaining)) — wenn du jetzt weitermachst")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+
+                ProgressView(value: day.progress(now: nowMinutes))
+                    .tint(accent)
+                    .padding(.top, 8)
+                HStack {
+                    Text(day.firstStart.map(TimeFormat.clock) ?? "--:--")
+                    Spacer()
+                    Text("\(Int(day.progress(now: nowMinutes) * 100)) %")
+                    Spacer()
+                    Text(endMinutes.map(TimeFormat.clock) ?? "--:--")
+                }
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: Stempeluhr
+    private var stampSection: some View {
+        Section {
+            HStack(spacing: 8) {
+                Image(systemName: statusIcon)
+                    .foregroundStyle(statusColor)
+                Text(statusText)
+                    .font(.subheadline)
+                Spacer()
+            }
+
+            if day.isRunning {
+                HStack(spacing: 12) {
+                    Button {
+                        stamp { day.punchOut(at: nowMinutes, asFeierabend: false) }
+                    } label: {
+                        Label("Pause", systemImage: "pause.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .tint(.orange)
+
+                    Button {
+                        stamp { day.punchOut(at: nowMinutes, asFeierabend: true) }
+                    } label: {
+                        Label("Feierabend", systemImage: "stop.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .tint(.red)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            } else {
+                Button {
+                    stamp { day.punchIn(at: nowMinutes) }
+                } label: {
+                    Label(
+                        day.intervals.isEmpty ? "Jetzt einstempeln" : "Weiter arbeiten",
+                        systemImage: "play.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.green)
+            }
+        } header: {
+            Text("Stempeluhr")
+        } footer: {
+            Text("„Pause“ und „Feierabend“ stempeln beide aus – der Unterschied ist nur die Anzeige.")
+        }
+    }
+
+    // MARK: Kennzahlen
+    private var statsSection: some View {
+        Section("Heute") {
+            HStack(spacing: 0) {
+                stat(title: "Geleistet", value: TimeFormat.duration(worked), tint: accent)
+                Divider().frame(height: 40)
+                stat(title: "Pause", value: TimeFormat.duration(pause), tint: .primary)
+                Divider().frame(height: 40)
+                if done {
+                    stat(title: "Überstunden", value: TimeFormat.duration(day.overtimeMinutes(now: nowMinutes)), tint: .green)
+                } else {
+                    stat(title: "Verbleibend", value: TimeFormat.duration(remaining), tint: .primary)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    // MARK: Stempelungen
+    private var intervalSection: some View {
+        Section {
+            if day.intervals.isEmpty {
+                Text("Noch keine Stempelungen heute.")
+                    .foregroundStyle(.secondary)
+            }
+
+            ForEach(day.sortedIntervals) { interval in
+                IntervalRow(interval: binding(for: interval.id), now: nowMinutes)
+                    .swipeActions {
+                        Button(role: .destructive) {
+                            day.intervals.removeAll { $0.id == interval.id }
+                        } label: {
+                            Label("Löschen", systemImage: "trash")
+                        }
+                    }
+            }
+
+            Button {
+                withAnimation {
+                    day.addManualInterval(defaultStart: 8 * 60)
+                }
+            } label: {
+                Label("Eintrag manuell hinzufügen", systemImage: "plus.circle")
+            }
+        } header: {
+            HStack {
+                Text("Stempelungen")
+                Spacer()
+                Text("\(day.intervals.count) Abschnitt\(day.intervals.count == 1 ? "" : "e")")
+            }
+        } footer: {
+            Text("Zeiten lassen sich direkt antippen und korrigieren. Zum Löschen nach links wischen.")
+        }
+    }
+
+    // MARK: Sollzeit
+    private var sollSection: some View {
+        Section("Sollzeit heute") {
+            HStack(spacing: 8) {
+                ForEach(presets, id: \.min) { p in
+                    Button(p.label) { day.sollMinutes = p.min }
+                        .buttonStyle(.bordered)
+                        .tint(day.sollMinutes == p.min ? accent : .gray)
+                        .font(.system(.subheadline, design: .monospaced))
+                }
+            }
+            DisclosureGroup(isExpanded: $showCustomTime) {
+                DurationWheelPicker(minutes: $day.sollMinutes)
+            } label: {
+                HStack {
+                    Text("Eigene Zeit")
+                    Spacer()
+                    Text(TimeFormat.duration(day.sollMinutes))
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    // MARK: Helfer
+    private func stamp(_ action: () -> Void) {
+        withAnimation { action() }
+        stampCount += 1
+    }
+
+    /// Binding über die id statt über den Index – so greift es beim Löschen nicht ins Leere.
+    private func binding(for id: UUID) -> Binding<WorkInterval> {
+        Binding {
+            day.intervals.first { $0.id == id } ?? WorkInterval(start: 0, end: nil)
+        } set: { newValue in
+            guard let index = day.intervals.firstIndex(where: { $0.id == id }) else { return }
+            day.intervals[index] = newValue
+        }
+    }
+
+    private func stat(title: String, value: String, tint: Color) -> some View {
         VStack(spacing: 2) {
             Text(title)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(value)
-                .font(.title3.weight(.semibold).monospacedDigit())
+                .font(.subheadline.weight(.semibold).monospacedDigit())
                 .foregroundStyle(tint)
                 .contentTransition(.numericText())
-            Text(caption)
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
+    }
+}
+
+// MARK: - IntervalRow
+struct IntervalRow: View {
+    @Binding var interval: WorkInterval
+    let now: Int
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                MinutePicker(minutes: $interval.start)
+
+                Text("–")
+                    .foregroundStyle(.secondary)
+
+                if let end = Binding($interval.end) {
+                    MinutePicker(minutes: end)
+                } else {
+                    Text("läuft …")
+                        .foregroundStyle(.green)
+                    Button {
+                        interval.end = max(interval.start, now)
+                    } label: {
+                        Image(systemName: "stop.circle")
+                    }
+                    .buttonStyle(.borderless)
+                }
+
+                Spacer(minLength: 4)
+
+                Text(TimeFormat.duration(interval.duration(now: now)))
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+
+            if let end = interval.end, end < interval.start {
+                Text("Ende liegt vor dem Beginn")
+                    .font(.caption2)
+                    .foregroundStyle(.red)
+            }
+        }
     }
 }
 
