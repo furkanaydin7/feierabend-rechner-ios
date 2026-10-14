@@ -38,14 +38,18 @@ struct HistoryView: View {
             ForEach(months, id: \.key) { month in
                 Section {
                     ForEach(month.days) { day in
-                        row(for: day)
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    store.delete(day)
-                                } label: {
-                                    Label("Löschen", systemImage: "trash")
-                                }
+                        NavigationLink {
+                            DayEditView(day: binding(for: day.id), isToday: day.dateKey == todayKey)
+                        } label: {
+                            row(for: day)
+                        }
+                        .swipeActions {
+                            Button(role: .destructive) {
+                                store.delete(day)
+                            } label: {
+                                Label("Löschen", systemImage: "trash")
                             }
+                        }
                     }
                 } header: {
                     monthHeader(key: month.key, balance: balance(of: month.days))
@@ -63,6 +67,16 @@ struct HistoryView: View {
             Text("Saldo \(TimeFormat.signedDuration(balance))")
                 .monospacedDigit()
                 .foregroundStyle(balance < 0 ? .red : .green)
+        }
+    }
+
+    /// Binding über die id statt über den Index – so greift es beim Löschen nicht ins Leere.
+    private func binding(for id: String) -> Binding<WorkDay> {
+        Binding {
+            store.days.first { $0.id == id } ?? WorkDay(dateKey: id, sollMinutes: 0)
+        } set: { newValue in
+            guard let index = store.days.firstIndex(where: { $0.id == id }) else { return }
+            store.days[index] = newValue
         }
     }
 
@@ -85,6 +99,8 @@ struct HistoryView: View {
             HStack {
                 Text(day.date, format: .dateTime.weekday(.wide).day().month().year())
                     .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 if day.dateKey == todayKey {
                     Text("Heute")
                         .font(.caption.bold())
@@ -100,20 +116,29 @@ struct HistoryView: View {
                         .foregroundStyle(diff < 0 ? .red : .green)
                 }
             }
-            HStack(spacing: 16) {
-                Label(
-                    "\(TimeFormat.clockOrDash(day.firstStart)) – \(TimeFormat.clockOrDash(day.lastEnd))",
-                    systemImage: "clock"
-                )
-                Label(TimeFormat.duration(workedMinutes), systemImage: "briefcase")
-                Label(TimeFormat.duration(day.pauseMinutes(now: reference(for: day))), systemImage: "cup.and.saucer")
+            HStack(spacing: 10) {
+                // Die Uhrzeiten haben Vorrang und werden nie gekürzt –
+                // wird es eng, verkleinern sich Arbeitszeit und Pause.
+                item("clock", "\(TimeFormat.clockOrDash(day.firstStart))–\(TimeFormat.clockOrDash(day.lastEnd))")
+                    .fixedSize()
+                    .layoutPriority(1)
+                item("briefcase", TimeFormat.duration(workedMinutes))
+                item("cup.and.saucer", TimeFormat.duration(day.pauseMinutes(now: reference(for: day))))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
         }
         .padding(.vertical, 2)
+    }
+
+    /// Kompakte Variante von `Label` mit wenig Abstand zwischen Symbol und Text.
+    private func item(_ systemImage: String, _ text: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+            Text(text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
     }
 }
 
