@@ -99,6 +99,8 @@ struct HistoryView: View {
             HStack {
                 Text(day.date, format: .dateTime.weekday(.wide).day().month().year())
                     .font(.headline)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 if day.dateKey == todayKey {
                     Text("Heute")
                         .font(.caption.bold())
@@ -114,19 +116,14 @@ struct HistoryView: View {
                         .foregroundStyle(diff < 0 ? .red : .green)
                 }
             }
-            // Passt alles in eine Zeile, bleibt es einzeilig – sonst rutschen
-            // Arbeitszeit und Pause in eine zweite Zeile, damit nichts abgeschnitten wird.
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) {
-                    timeLabel(for: day)
-                    durationLabels(for: day, worked: workedMinutes)
-                }
-                VStack(alignment: .leading, spacing: 4) {
-                    timeLabel(for: day)
-                    HStack(spacing: 12) {
-                        durationLabels(for: day, worked: workedMinutes)
-                    }
-                }
+            HStack(spacing: 10) {
+                // Die Uhrzeiten haben Vorrang und werden nie gekürzt –
+                // wird es eng, verkleinern sich Arbeitszeit und Pause.
+                item("clock", "\(TimeFormat.clockOrDash(day.firstStart))–\(TimeFormat.clockOrDash(day.lastEnd))")
+                    .fixedSize()
+                    .layoutPriority(1)
+                item("briefcase", TimeFormat.duration(workedMinutes))
+                item("cup.and.saucer", TimeFormat.duration(day.pauseMinutes(now: reference(for: day))))
             }
             .font(.caption.monospacedDigit())
             .foregroundStyle(.secondary)
@@ -134,20 +131,14 @@ struct HistoryView: View {
         .padding(.vertical, 2)
     }
 
-    private func timeLabel(for day: WorkDay) -> some View {
-        Label(
-            "\(TimeFormat.clockOrDash(day.firstStart)) – \(TimeFormat.clockOrDash(day.lastEnd))",
-            systemImage: "clock"
-        )
-        .fixedSize()
-    }
-
-    @ViewBuilder
-    private func durationLabels(for day: WorkDay, worked: Int) -> some View {
-        Label(TimeFormat.duration(worked), systemImage: "briefcase")
-            .fixedSize()
-        Label(TimeFormat.duration(day.pauseMinutes(now: reference(for: day))), systemImage: "cup.and.saucer")
-            .fixedSize()
+    /// Kompakte Variante von `Label` mit wenig Abstand zwischen Symbol und Text.
+    private func item(_ systemImage: String, _ text: String) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: systemImage)
+            Text(text)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
     }
 }
 
